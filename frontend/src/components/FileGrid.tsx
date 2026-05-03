@@ -181,7 +181,6 @@ interface GridCellProps {
 function GridCell({ file, size, selected, isSelectMode, onToggle, onOpen, onLongPress }: GridCellProps) {
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didLongPress = useRef(false)
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
 
   const startLongPress = useCallback(() => {
     didLongPress.current = false
@@ -221,7 +220,7 @@ function GridCell({ file, size, selected, isSelectMode, onToggle, onOpen, onLong
       onClick={handleClick}
       style={{
         width: size,
-        height: size - (isMobile ? 21 : 0),
+        height: size,
         flexShrink: 0,
         position: 'relative',
         cursor: 'pointer',
