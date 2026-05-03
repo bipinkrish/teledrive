@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Download, X, Package, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { FileDoc, api, PartsResponse } from '../lib/api'
 import { fmtBytes } from '../lib/utils'
@@ -22,14 +22,16 @@ async function streamDownload(
   url: string,
   filename: string,
   onProgress: (loaded: number, total: number) => void,
+  signal: AbortSignal,
 ) {
-  const r = await fetch(url)
+  const r = await fetch(url, { signal })
   const total = parseInt(r.headers.get('content-length') || '0')
   const reader = r.body!.getReader()
   const chunks: Uint8Array[] = []
   let loaded = 0
 
   while (true) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError")
     const { done, value } = await reader.read()
     if (done) break
     chunks.push(value!)
@@ -52,6 +54,15 @@ export function DownloadManager({ files, onClose }: Props) {
     }))
   )
   const [started, setStarted] = useState(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    return () => {
+      controller.abort()
+    }
+  }, [])
 
   function update(message_id: number, patch: Partial<DownloadItem>) {
     setItems(prev => prev.map(it =>
@@ -79,7 +90,7 @@ export function DownloadManager({ files, onClose }: Props) {
               update(file.message_id, {
                 progress: part.part_num - 1 + loaded / total,
               })
-            })
+            }, abortControllerRef.current!.signal)
             update(file.message_id, { progress: part.part_num })
           }
           update(file.message_id, { state: 'done', progress: parts.total_parts })
@@ -92,7 +103,7 @@ export function DownloadManager({ files, onClose }: Props) {
           const url = api.files.downloadUrl(file.message_id, file.channel_id)
           await streamDownload(url, file.name, (loaded, total) => {
             update(file.message_id, { loaded, total, progress: Math.round(loaded / total * 100) })
-          })
+          }, abortControllerRef.current!.signal)
           update(file.message_id, { state: 'done', progress: 100 })
         } catch (e: any) {
           update(file.message_id, { state: 'error', error: e.message })
@@ -156,16 +167,15 @@ export function DownloadManager({ files, onClose }: Props) {
           ) : (
             <button
               onClick={onClose}
-              disabled={!allDone}
               style={{
                 flex: 1, padding: '8px 0',
                 background: allDone ? 'var(--bg-3)' : 'var(--bg-2)',
                 borderRadius: 'var(--radius)',
-                color: allDone ? 'var(--text)' : 'var(--text-3)',
+                color: allDone ? 'var(--text)' : 'var(--danger)',
                 fontSize: 13,
               }}
             >
-              {allDone ? 'Close' : 'Downloading…'}
+              {allDone ? 'Close' : 'Cancel Download'}
             </button>
           )}
         </div>

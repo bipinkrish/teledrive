@@ -6,6 +6,9 @@ interface AppState {
   channel: Channel | null
   setChannel: (c: Channel | null) => void
 
+  sidebarOpen: boolean
+  setSidebarOpen: (o: boolean) => void
+
   // Navigation
   folderPath: string          // current folder path in folder mode
   setFolderPath: (p: string) => void
@@ -27,6 +30,9 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set) => ({
+  sidebarOpen: window.innerWidth > 768,
+  setSidebarOpen: (o) => set({ sidebarOpen: o }),
+
   channel: null,
   setChannel: (c) => set({ channel: c, folderPath: '', selected: new Set() }),
 

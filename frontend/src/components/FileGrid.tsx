@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { CheckSquare, Square } from 'lucide-react'
 import { FileDoc } from '../lib/api'
@@ -6,8 +6,6 @@ import { Thumbnail } from './Thumbnail'
 import { fmtBytes, fmtDate } from '../lib/utils'
 import { useStore } from '../lib/store'
 
-const GRID_ITEM_W = 200
-const GRID_ITEM_H = 200
 const LIST_ITEM_H = 52
 
 interface Props {
@@ -46,13 +44,31 @@ export function FileGrid({ files, onOpen }: Props) {
 /* ── Grid view ─────────────────────────────────────────────────────────────── */
 
 function GridView({ files, selected, toggleSelect, onOpen, containerRef }: any) {
-  const [cols, setCols] = useState(7)
+  const [cols, setCols] = useState(2)
+  const [itemSize, setItemSize] = useState(160)
+
+  useEffect(() => {
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width
+        let newCols = Math.floor((width - 32) / 160)
+        if (newCols < 2) newCols = 2 // min 2 cols on mobile
+        if (width < 250) newCols = 1
+        
+        const newSize = (width - 32 - (newCols - 1) * 4) / newCols
+        setCols(newCols)
+        setItemSize(newSize)
+      }
+    })
+    if (containerRef.current) observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [containerRef])
 
   const rows = Math.ceil(files.length / cols)
   const rowVirtualizer = useVirtualizer({
     count: rows,
     getScrollElement: () => containerRef.current,
-    estimateSize: () => GRID_ITEM_H  + 4,
+    estimateSize: () => itemSize + 4,
     overscan: 3,
   })
 
@@ -69,7 +85,7 @@ function GridView({ files, selected, toggleSelect, onOpen, containerRef }: any) 
               key={vRow.key}
               style={{
                 position: 'absolute', top: vRow.start, left: 0, right: 0,
-                display: 'flex', gap: 4, padding: '0 16px', 
+                display: 'flex', gap: 4, padding: '0 16px',
               }}
             >
               {rowFiles.map((file: FileDoc) => (
@@ -79,6 +95,7 @@ function GridView({ files, selected, toggleSelect, onOpen, containerRef }: any) 
                   selected={selected.has(file.message_id)}
                   onToggle={() => toggleSelect(file.message_id)}
                   onOpen={() => onOpen(file)}
+                  size={itemSize}
                 />
               ))}
             </div>
@@ -89,17 +106,24 @@ function GridView({ files, selected, toggleSelect, onOpen, containerRef }: any) 
   )
 }
 
-function GridCell({ file, selected, onToggle, onOpen }: {
-  file: FileDoc; selected: boolean; onToggle: () => void; onOpen: () => void
+function GridCell({ file, selected, onToggle, onOpen, size }: {
+  file: FileDoc; selected: boolean; onToggle: () => void; onOpen: () => void; size: number
 }) {
   const [hovered, setHovered] = useState(false)
 
   return (
     <div
+      draggable
+      onDragStart={e => {
+        const ids = selected ? Array.from(useStore.getState().selected) : [file.message_id];
+        if (!ids.includes(file.message_id)) ids.push(file.message_id);
+        e.dataTransfer.setData('teledrive/msg-ids', ids.join(','));
+        e.dataTransfer.effectAllowed = 'move';
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        width: GRID_ITEM_W, flexShrink: 0,
+        width: size, flexShrink: 0,
         cursor: 'pointer', position: 'relative',
         // borderRadius: 'var(--radius)',
         outline: selected ? '2px solid var(--accent)' : 'none',
@@ -122,7 +146,7 @@ function GridCell({ file, selected, onToggle, onOpen }: {
       </button>
 
       <div onClick={onOpen}>
-        <Thumbnail file={file} size={GRID_ITEM_W} />
+        <Thumbnail file={file} size={size} />
         {/* <div style={{ padding: '6px 2px' }}>
           <div className="truncate" style={{ fontSize: 12, fontWeight: 500 }}>
             {file.name}
@@ -175,6 +199,13 @@ function ListView({ files, selected, toggleSelect, onOpen }: any) {
           return (
             <div
               key={vRow.key}
+              draggable
+              onDragStart={e => {
+                const ids = isSel ? Array.from(useStore.getState().selected) : [file.message_id];
+                if (!ids.includes(file.message_id)) ids.push(file.message_id);
+                e.dataTransfer.setData('teledrive/msg-ids', ids.join(','));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
               style={{
                 position: 'absolute', top: vRow.start, left: 0, right: 0,
                 height: LIST_ITEM_H,

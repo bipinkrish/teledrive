@@ -10,8 +10,10 @@ export function Sidebar() {
   const [newTitle, setNewTitle] = useState('')
 
   useEffect(() => {
-    api.channels.list().then(r => setChannels(r.channels))
-  }, [])
+    api.channels.list().then(r => {
+      setChannels(r.channels)
+    })
+  }, [setChannel])
 
   async function createChannel() {
     if (!newTitle.trim()) return
@@ -31,14 +33,17 @@ export function Sidebar() {
     }}>
       {/* Logo */}
       <div style={{
-        padding: '14px 16px',
+        padding: '11px 16px',
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 8,
       }}>
         <HardDrive size={16} color="var(--accent)" />
-        <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: '-0.01em' }}>
+        <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: '-0.01em', flex: 1 }}>
           TeleDrive
         </span>
+        <button onClick={() => useStore.getState().setSidebarOpen(false)} style={{ color: 'var(--text-3)' }}>
+          <X size={16} />
+        </button>
       </div>
 
       {/* Channels */}
@@ -54,7 +59,10 @@ export function Sidebar() {
         {channels.map(ch => (
           <button
             key={ch.id}
-            onClick={() => setChannel(ch)}
+            onClick={() => {
+              setChannel(ch)
+              if (window.innerWidth <= 768) useStore.getState().setSidebarOpen(false)
+            }}
             style={{
               width: '100%', textAlign: 'left',
               padding: '7px 12px', fontSize: 13,

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { FileDoc, api } from '../lib/api'
-import { ImageIcon, FileVideo, FileAudio, File, Package } from 'lucide-react'
+import { FileDoc, api, loadThumbnail } from '../lib/api'
+import { ImageIcon, FileVideo, FileAudio, File, Package, PlayCircleIcon } from 'lucide-react'
 
 interface Props {
   file: FileDoc
@@ -21,12 +21,19 @@ export function Thumbnail({ file, size = 160 }: Props) {
 
   const hasThumbnail = !!file.thumb_msg_id
 
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null)
+
   useEffect(() => {
     if (!hasThumbnail) return
     const obs = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
           setState('loading')
+          loadThumbnail(file.message_id, file.channel_id)
+            .then(url => {
+              setThumbUrl(url)
+            })
+            .catch(() => setState('error'))
           obs.disconnect()
         }
       },
@@ -34,11 +41,7 @@ export function Thumbnail({ file, size = 160 }: Props) {
     )
     if (ref.current) obs.observe(ref.current)
     return () => obs.disconnect()
-  }, [hasThumbnail])
-
-  const thumbUrl = hasThumbnail
-    ? api.files.thumbnailUrl(file.message_id, file.channel_id)
-    : null
+  }, [hasThumbnail, file.message_id, file.channel_id])
 
   const Icon = typeIcon[file.type] ?? File
 
@@ -100,22 +103,19 @@ export function Thumbnail({ file, size = 160 }: Props) {
           color: 'var(--warn)',
         }}>
           <Package size={10} />
-          {file.total_parts}p
+          {file.total_parts}
         </div>
       )}
 
       {/* Type badge for non-images */}
       {file.type !== 'image' && (
         <div style={{
-          position: 'absolute', bottom: 4, left: 4,
-          background: 'rgba(0,0,0,0.7)',
-          borderRadius: 3, padding: '1px 5px',
-          fontSize: 9, textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          color: file.type === 'video' ? '#a78bfa' :
-                 file.type === 'audio' ? '#34d399' : 'var(--text-2)',
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.1)',
+          color: 'rgba(255,255,255,0.9)',
         }}>
-          {file.type}
+          <PlayCircleIcon size={Math.min(48, size * 0.5)} strokeWidth={1.5} />
         </div>
       )}
     </div>

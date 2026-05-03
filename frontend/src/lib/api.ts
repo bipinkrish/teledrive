@@ -104,8 +104,12 @@ export const api = {
     },
     folders: (channel_id: number) =>
       get<{ folders: string[] }>(`/api/files/folders?channel_id=${channel_id}`),
+    move: (message_ids: number[], channel_id: number, new_folder_path: string) =>
+      post<{ ok: boolean; modified: number }>('/api/files/move', { message_ids, channel_id, new_folder_path }),
     thumbnailUrl: (message_id: number, channel_id: number) =>
       `${BASE}/api/files/${message_id}/thumbnail?channel_id=${channel_id}`,
+    thumbnailsBatch: (message_ids: string, channel_id: number) =>
+      get<Record<string, string>>(`/api/files/thumbnails?message_ids=${message_ids}&channel_id=${channel_id}`),
     downloadUrl: (message_id: number, channel_id: number) =>
       `${BASE}/api/files/${message_id}/download?channel_id=${channel_id}`,
     parts: (message_id: number, channel_id: number) =>
@@ -128,3 +132,40 @@ export const api = {
       get<{ running: boolean; processed: number; errors: number }>(`/api/sync/status/${channel_id}`),
   },
 }
+
+let thumbQueue: { message_id: number, channel_id: number, resolve: (url: string) => void, reject: (err: any) => void }[] = []
+let thumbTimeout: any = null
+
+export const loadThumbnail = (message_id: number, channel_id: number): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    thumbQueue.push({ message_id, channel_id, resolve, reject })
+    if (!thumbTimeout) {
+      thumbTimeout = setTimeout(flushThumbnails, 50)
+    }
+  })
+}
+
+async function flushThumbnails() {
+  const batch = thumbQueue
+  thumbQueue = []
+  thumbTimeout = null
+  
+  if (batch.length === 0) return
+  
+  const channel_id = batch[0].channel_id
+  const message_ids = batch.map(b => b.message_id).join(',')
+  
+  try {
+    const res = await api.files.thumbnailsBatch(message_ids, channel_id)
+    for (const b of batch) {
+      if (res[b.message_id]) {
+        b.resolve(res[b.message_id])
+      } else {
+        b.reject(new Error("Not found"))
+      }
+    }
+  } catch (err) {
+    batch.forEach(b => b.reject(err))
+  }
+}
+

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   Grid, List, FolderOpen, Layers, Image, FileVideo,
   FileAudio, File, Download, X, ChevronRight, RefreshCw,
-  Share2, Folder,
+  Share2, Folder, MoveRight, Menu, Plus
 } from 'lucide-react'
 import { api, FileDoc, MediaType } from '../lib/api'
 import { useStore } from '../lib/store'
@@ -19,6 +19,7 @@ export function Browser() {
     viewMode, setViewMode,
     typeFilter, setTypeFilter,
     selected, clearSelection, selectAll,
+    sidebarOpen, setSidebarOpen
   } = useStore()
 
   const [files, setFiles] = useState<FileDoc[]>([])
@@ -32,14 +33,17 @@ export function Browser() {
   const [dlFiles, setDlFiles] = useState<FileDoc[] | null>(null)
   // Share modal
   const [shareOpen, setShareOpen] = useState(false)
+  // Move modal
+  const [moveOpen, setMoveOpen] = useState(false)
+  // Refresh trigger
+  const [refresh, setRefresh] = useState(0)
 
   const channelId = channel?.channel_id
 
-  // Load folder list once per channel
   useEffect(() => {
     if (!channelId) return
     api.files.folders(channelId).then(r => setAllFolders(r.folders))
-  }, [channelId])
+  }, [channelId, refresh])
 
   // Load files
   useEffect(() => {
@@ -59,7 +63,7 @@ export function Browser() {
     api.files.list(params)
       .then(r => { setFiles(r.items); setTotal(r.total) })
       .finally(() => setLoading(false))
-  }, [channelId, folderPath, browseMode, typeFilter])
+  }, [channelId, folderPath, browseMode, typeFilter, refresh])
 
   if (!channel) return null
 
@@ -67,7 +71,7 @@ export function Browser() {
   const selectedFiles = files.filter(f => selected.has(f.message_id))
 
   const handleOpen = (file: FileDoc) => {
-    if (file.type === 'image' && !file.is_split) setLightboxFile(file)
+    if (file.type === 'image' || file.type === 'video') setLightboxFile(file)
   }
 
   const handleDownloadSelected = () => {
@@ -75,6 +79,15 @@ export function Browser() {
   }
 
   const handleDownloadSingle = (file: FileDoc) => setDlFiles([file])
+
+  const handleMoveFiles = async (newPath: string) => {
+    if (!channelId || selectedFiles.length === 0) return
+    const msgIds = selectedFiles.map(f => f.message_id)
+    await api.files.move(msgIds, channelId, newPath)
+    setMoveOpen(false)
+    clearSelection()
+    setRefresh(r => r + 1)
+  }
 
   return (
     <div style={{
@@ -86,8 +99,13 @@ export function Browser() {
         borderBottom: '1px solid var(--border)',
         padding: '8px 16px',
         display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        background: 'var(--bg-1)',
+        background: 'var(--bg-1)'
       }}>
+        {!sidebarOpen && (
+          <button onClick={() => setSidebarOpen(true)} style={{ color: 'var(--text-2)', height: "16px" }}>
+            <Menu size={16} />
+          </button>
+        )}
         {/* Breadcrumb */}
         <BreadCrumb path={folderPath} onNavigate={setFolderPath} />
 
@@ -119,17 +137,17 @@ export function Browser() {
         />
 
         {/* Share */}
-        <ToolBtn onClick={() => setShareOpen(true)} title="Share this folder">
+        {/* <ToolBtn onClick={() => setShareOpen(true)} title="Share this folder">
           <Share2 size={13} /> Share
-        </ToolBtn>
+        </ToolBtn> */}
 
         {/* Sync */}
-        <ToolBtn
+        {/* <ToolBtn
           onClick={() => api.sync.start(channel.channel_id)}
           title="Sync DB from Telegram"
         >
           <RefreshCw size={13} />
-        </ToolBtn>
+        </ToolBtn> */}
       </div>
 
       {/* ── Selection bar ─────────────────────────────────────────────── */}
@@ -148,6 +166,16 @@ export function Browser() {
           </button>
           <div style={{ flex: 1 }} />
           <button
+            onClick={() => setMoveOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              background: 'var(--bg-3)', color: 'var(--text)',
+              borderRadius: 'var(--radius)', padding: '4px 10px', fontSize: 12,
+            }}
+          >
+            <MoveRight size={12} /> Move
+          </button>
+          <button
             onClick={handleDownloadSelected}
             style={{
               display: 'flex', alignItems: 'center', gap: 5,
@@ -155,7 +183,7 @@ export function Browser() {
               borderRadius: 'var(--radius)', padding: '4px 10px', fontSize: 12,
             }}
           >
-            <Download size={12} /> Download {selected.size}
+            <Download size={12} /> Download
           </button>
           <button onClick={clearSelection} style={{ color: 'var(--text-3)' }}>
             <X size={14} />
@@ -169,7 +197,7 @@ export function Browser() {
         {/* Folder sidebar — only in folder mode */}
         {browseMode === 'folder' && childFolderNames.length > 0 && (
           <div style={{
-            width: 200, borderRight: '1px solid var(--border)',
+            width: 'clamp(120px, 30vw, 200px)', borderRight: '1px solid var(--border)',
             overflowY: 'auto', padding: '8px 0', flexShrink: 0,
           }}>
             {folderPath && (
@@ -190,6 +218,19 @@ export function Browser() {
                 <button
                   key={name}
                   onClick={() => setFolderPath(fullPath)}
+                  onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                  onDrop={e => {
+                    e.preventDefault()
+                    const data = e.dataTransfer.getData('teledrive/msg-ids')
+                    if (data) {
+                      const msgIds = data.split(',').map(Number)
+                      if (!channelId) return
+                      api.files.move(msgIds, channelId, fullPath).then(() => {
+                        clearSelection()
+                        setRefresh(r => r + 1)
+                      })
+                    }
+                  }}
                   style={{
                     width: '100%', padding: '6px 12px',
                     textAlign: 'left', fontSize: 13,
@@ -203,6 +244,27 @@ export function Browser() {
                 </button>
               )
             })}
+
+            <button
+              onClick={() => {
+                const name = prompt("New folder name")
+                if (name) {
+                  const newPath = folderPath ? `${folderPath}/${name}` : name
+                  setAllFolders([...allFolders, newPath])
+                  setFolderPath(newPath)
+                }
+              }}
+              style={{
+                width: '100%', padding: '6px 12px', marginTop: 10,
+                textAlign: 'left', fontSize: 13,
+                display: 'flex', alignItems: 'center', gap: 7,
+                color: 'var(--text-3)',
+                borderRadius: 0,
+              }}
+            >
+              <Plus size={13} />
+              <span className="truncate">New Folder</span>
+            </button>
           </div>
         )}
 
@@ -235,6 +297,13 @@ export function Browser() {
           channel={channel}
           path={folderPath || undefined}
           onClose={() => setShareOpen(false)}
+        />
+      )}
+      {moveOpen && (
+        <MoveModal
+          folders={allFolders}
+          onClose={() => setMoveOpen(false)}
+          onMove={handleMoveFiles}
         />
       )}
     </div>
@@ -305,8 +374,8 @@ function TypeFilter({ value, onChange }: { value: MediaType | ''; onChange: (v: 
     { v: '', icon: Layers, label: 'All' },
     { v: 'image', icon: Image, label: 'Images' },
     { v: 'video', icon: FileVideo, label: 'Videos' },
-    { v: 'audio', icon: FileAudio, label: 'Audio' },
-    { v: 'document', icon: File, label: 'Docs' },
+    // { v: 'audio', icon: FileAudio, label: 'Audio' },
+    // { v: 'document', icon: File, label: 'Docs' },
   ]
   return (
     <div style={{ display: 'flex', gap: 4 }}>
@@ -347,3 +416,37 @@ function ToolBtn({ children, onClick, title }: {
     </button>
   )
 }
+
+function MoveModal({ folders, onClose, onMove }: { folders: string[], onClose: () => void, onMove: (p: string) => void }) {
+  const [path, setPath] = useState('')
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center'
+    }}>
+      <div style={{ background: 'var(--bg-1)', padding: 20, borderRadius: 'var(--radius)', width: 400, maxWidth: '90vw', border: '1px solid var(--border)' }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Move Files</h3>
+        <input
+          value={path}
+          onChange={e => setPath(e.target.value)}
+          placeholder="New folder path (e.g. Pictures/Vacation)"
+          style={{ width: '100%', padding: '8px 12px', marginBottom: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 'var(--radius)' }}
+          autoFocus
+        />
+        <div style={{ maxHeight: 150, overflowY: 'auto', marginBottom: 16, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+          {folders.filter(f => f.toLowerCase().includes(path.toLowerCase())).map(f => (
+            <div key={f} onClick={() => setPath(f)} style={{ padding: '6px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+              {f || 'Root'}
+            </div>
+          ))}
+          {folders.length === 0 && <div style={{ padding: '6px 12px', fontSize: 13, color: 'var(--text-3)' }}>No folders exist yet.</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '6px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg-2)' }}>Cancel</button>
+          <button onClick={() => onMove(path)} style={{ padding: '6px 12px', background: 'var(--accent)', color: '#fff', borderRadius: 'var(--radius)' }}>Move</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
