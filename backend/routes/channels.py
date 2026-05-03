@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from db import get_db
 from telegram_client import get_client
 
@@ -32,3 +33,18 @@ async def create_channel(title: str, description: str = ""):
         {"channel_id": channel_id}, {"$set": doc}, upsert=True
     )
     return {"channel_id": channel_id, "title": title}
+
+
+class ThumbZipUpdate(BaseModel):
+    message_id: int
+
+
+@router.post("/{channel_id}/thumb_zip")
+async def update_thumb_zip(channel_id: int, body: ThumbZipUpdate):
+    db = get_db()
+    await db.channels.update_one(
+        {"channel_id": channel_id},
+        {"$set": {"thumb_zip_id": body.message_id}},
+        upsert=True
+    )
+    return {"ok": True}

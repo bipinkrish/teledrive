@@ -15,6 +15,7 @@ from routes import files, channels, shares, sync
 async def lifespan(app: FastAPI):
     await db.connect()
     await get_client()   # warm up Telegram session on startup
+    await files.load_all_thumb_zips()
     yield
     await disconnect_client()
     await db.disconnect()

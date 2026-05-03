@@ -544,6 +544,116 @@ def cleanup(channel, api_id, api_hash, session_string, bot_token, dry_run):
     asyncio.run(run())
 
 
+@cli.command("pack-thumbs")
+@click.option("--channel",        required=True, type=int)
+@click.option("--api-id",         envvar="API_ID",         required=True, type=int)
+@click.option("--api-hash",       envvar="API_HASH",       required=True)
+@click.option("--session-string", envvar="SESSION_STRING", default=None)
+@click.option("--bot-token",      envvar="BOT_TOKEN",      default=None)
+@click.option("--backend",        envvar="BACKEND_URL",    required=True)
+def pack_thumbs(channel, api_id, api_hash, session_string, bot_token, backend):
+    """
+    Fetch all thumbnail messages from DB, download them, zip them with mapping.json,
+    upload to the channel as [THUMB_ZIP], and update the backend channel doc.
+    """
+    import zipfile
+    from pyrogram.errors import FloodWait
+
+    async def run():
+        app = _make_client(api_id, api_hash, session_string, bot_token)
+        async with app:
+            console.print("[green]✓ Connected to Telegram[/]")
+
+            async def with_retry(coro_func, *args, **kwargs):
+                while True:
+                    try:
+                        return await coro_func(*args, **kwargs)
+                    except FloodWait as e:
+                        wait = int(getattr(e, "value", getattr(e, "x", 10))) + 1
+                        console.print(f"[yellow]FloodWait: sleeping {wait} seconds...[/]")
+                        await asyncio.sleep(wait)
+
+            async with httpx.AsyncClient(timeout=30) as http:
+                console.print("Fetching file list from backend...")
+                res = await http.get(f"{backend}/api/files?limit=999999&channel_id={channel}")
+                if res.status_code != 200:
+                    console.print(f"[red]Failed to get files: {res.text}[/]")
+                    return
+                data = res.json()
+                
+            items = data.get("items", [])
+            thumb_msgs = {str(item["message_id"]): int(item["thumb_msg_id"]) for item in items if item.get("thumb_msg_id")}
+            
+            if not thumb_msgs:
+                console.print("No thumbnails found.")
+                return
+                
+            console.print(f"Found {len(thumb_msgs)} files with thumbnails.")
+            mapping = {msg_id: f"{thumb_id}.jpg" for msg_id, thumb_id in thumb_msgs.items()}
+            
+            # Download messages
+            msg_ids = list(set(thumb_msgs.values()))
+            messages = []
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                console=console
+            ) as prog:
+                task = prog.add_task("Fetching messages from Telegram...", total=len(msg_ids))
+                for i in range(0, len(msg_ids), 200):
+                    chunk = msg_ids[i:i+200]
+                    msgs = await with_retry(app.get_messages, channel, chunk)
+                    messages.extend([m for m in msgs if m and not m.empty and m.document])
+                    prog.update(task, advance=len(chunk))
+            
+            with tempfile.TemporaryDirectory() as td:
+                td_path = Path(td)
+                zip_path = td_path / "thumbs.zip"
+                
+                downloaded = 0
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TaskProgressColumn(),
+                    MofNCompleteColumn(),
+                    TimeElapsedColumn(),
+                    console=console
+                ) as prog:
+                    task = prog.add_task("Downloading & Zipping thumbnails...", total=len(messages))
+                    
+                    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr("mapping.json", json.dumps(mapping))
+                        for msg in messages:
+                            buf = await with_retry(app.download_media, msg, in_memory=True)
+                            if buf:
+                                zf.writestr(f"{msg.id}.jpg", buf.getvalue())
+                                downloaded += 1
+                            prog.update(task, advance=1)
+                            
+                console.print(f"Uploading zipped thumbnails ({downloaded} thumbs)...")
+                caption = "[THUMB_ZIP]\n"
+                up_msg = await with_retry(app.send_document, channel, str(zip_path), caption=caption)
+                
+                console.print("Updating backend with thumb_zip_id...")
+                async with httpx.AsyncClient(timeout=30) as http:
+                    res = await http.post(
+                        f"{backend}/api/channels/{channel}/thumb_zip", 
+                        json={"message_id": up_msg.id}
+                    )
+                    if res.status_code == 200:
+                        console.print("[green]✓ Optimization complete![/]")
+                    else:
+                        console.print(f"[red]Failed to update backend: {res.text}[/]")
+
+    asyncio.run(run())
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv("backend/.env")

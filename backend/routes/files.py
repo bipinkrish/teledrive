@@ -2,6 +2,9 @@ import re
 import struct
 import asyncio
 import base64
+import zipfile
+import json
+import io
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +19,38 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 LOCAL_HEADER_SIG = b'PK\x03\x04'
 ZIP_CHUNK = 512 * 1024   # 512 KB per read
 
+# Global in-memory cache for thumbnails downloaded from zips
+thumb_cache = {}
+
+async def load_thumb_zip(channel_id: int, zip_msg_id: int):
+    """Downloads a thumbnail zip from Telegram and loads it into memory cache."""
+    app = await get_client()
+    try:
+        msg = await app.get_messages(channel_id, zip_msg_id)
+        if msg and msg.document:
+            buf = await app.download_media(msg, in_memory=True)
+            if buf:
+                with zipfile.ZipFile(buf) as z:
+                    mapping = json.loads(z.read("mapping.json").decode("utf-8"))
+                    count = 0
+                    for msg_id, filename in mapping.items():
+                        try:
+                            img_data = z.read(filename)
+                            b64 = base64.b64encode(img_data).decode("utf-8")
+                            thumb_cache[(channel_id, int(msg_id))] = f"data:image/jpeg;base64,{b64}"
+                            count += 1
+                        except Exception:
+                            pass
+                    print(f"[THUMB ZIP] Loaded {count} thumbnails for channel {channel_id}")
+    except Exception as e:
+        print(f"[THUMB ZIP] Error loading zip for {channel_id}: {e}")
+
+async def load_all_thumb_zips():
+    """Initializes the thumbnail cache using channel thumb_zip_id records."""
+    db = get_db()
+    channels = await db.channels.find({"thumb_zip_id": {"$exists": True}}).to_list(1000)
+    for ch in channels:
+        await load_thumb_zip(ch["channel_id"], ch["thumb_zip_id"])
 
 def _serialize(doc) -> dict:
     doc["id"] = str(doc.pop("_id"))
@@ -148,10 +183,24 @@ async def get_thumbnails_batch(message_ids: str, channel_id: int):
     mids = [int(x) for x in message_ids.split(",") if x.strip()]
     if not mids:
         return {}
+        
+    res = {}
+    missing_mids = []
+    
+    # Check memory cache first
+    for m in mids:
+        cached = thumb_cache.get((channel_id, m))
+        if cached:
+            res[str(m)] = cached
+        else:
+            missing_mids.append(m)
+            
+    if not missing_mids:
+        return res
     
     db = get_db()
     docs = await db.files.find(
-        {"message_id": {"$in": mids}, "channel_id": channel_id}
+        {"message_id": {"$in": missing_mids}, "channel_id": channel_id}
     ).to_list(length=1000)
     
     doc_map = {}
@@ -163,10 +212,9 @@ async def get_thumbnails_batch(message_ids: str, channel_id: int):
             doc_map[tmid] = doc["message_id"]
             
     if not thumb_msg_ids:
-        return {}
+        return res
         
     app = await get_client()
-    res = {}
     for i in range(0, len(thumb_msg_ids), 200):
         chunk_ids = thumb_msg_ids[i:i+200]
         msgs = await app.get_messages(channel_id, chunk_ids)
@@ -179,7 +227,10 @@ async def get_thumbnails_batch(message_ids: str, channel_id: int):
                         b64 = base64.b64encode(buf.getbuffer()).decode('utf-8')
                         orig_mid = doc_map.get(msg.id)
                         if orig_mid:
-                            return str(orig_mid), f"data:image/jpeg;base64,{b64}"
+                            data_str = f"data:image/jpeg;base64,{b64}"
+                            # Also cache it for the future
+                            thumb_cache[(channel_id, orig_mid)] = data_str
+                            return str(orig_mid), data_str
             except Exception:
                 pass
             return None
