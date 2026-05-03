@@ -1,4 +1,5 @@
 const BASE = import.meta.env.VITE_API_URL ?? ''
+console.log('TeleDrive API Base:', BASE || 'window.location.origin')
 
 export type MediaType = 'image' | 'video' | 'audio' | 'document'
 export type ViewMode = 'grid' | 'list'
