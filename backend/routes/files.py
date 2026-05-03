@@ -201,6 +201,10 @@ async def download_file(message_id: int, channel_id: int, request: Request, inli
 
     async def stream_telegram_bytes(app, msg, offset_bytes: int, length_bytes: int):
         CHUNK_SIZE = 1024 * 1024
+        file_size = msg.document.file_size
+        if offset_bytes >= file_size or length_bytes <= 0:
+            return
+
         chunk_index = offset_bytes // CHUNK_SIZE
         skip_bytes = offset_bytes % CHUNK_SIZE
         
