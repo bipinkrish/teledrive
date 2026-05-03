@@ -1,3 +1,5 @@
+import { cacheGet, cacheSet } from './thumbCache'
+
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
 export type MediaType = 'image' | 'video' | 'audio' | 'document'
@@ -133,11 +135,24 @@ export const api = {
   },
 }
 
-let thumbQueue: { message_id: number, channel_id: number, resolve: (url: string) => void, reject: (err: any) => void }[] = []
-let thumbTimeout: any = null
+interface ThumbRequest {
+  message_id: number
+  channel_id: number
+  resolve: (url: string) => void
+  reject: (err: unknown) => void
+}
+
+let thumbQueue: ThumbRequest[] = []
+let thumbTimeout: ReturnType<typeof setTimeout> | null = null
 
 export const loadThumbnail = (message_id: number, channel_id: number): Promise<string> => {
-  return new Promise((resolve, reject) => {
+  const cacheKey = `${message_id}:${channel_id}`
+  return new Promise(async (resolve, reject) => {
+    // 1. Check IDB cache first (fast path)
+    const cached = await cacheGet(cacheKey)
+    if (cached) { resolve(cached); return }
+
+    // 2. Enqueue for batch network fetch
     thumbQueue.push({ message_id, channel_id, resolve, reject })
     if (!thumbTimeout) {
       thumbTimeout = setTimeout(flushThumbnails, 50)
@@ -158,10 +173,13 @@ async function flushThumbnails() {
   try {
     const res = await api.files.thumbnailsBatch(message_ids, channel_id)
     for (const b of batch) {
-      if (res[b.message_id]) {
-        b.resolve(res[b.message_id])
+      const url = res[String(b.message_id)]
+      if (url) {
+        // Write through to IDB cache
+        cacheSet(`${b.message_id}:${b.channel_id}`, url).catch(() => {})
+        b.resolve(url)
       } else {
-        b.reject(new Error("Not found"))
+        b.reject(new Error('Not found'))
       }
     }
   } catch (err) {

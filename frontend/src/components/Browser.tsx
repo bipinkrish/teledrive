@@ -271,9 +271,9 @@ export function Browser() {
         {/* Files area */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {loading ? (
-            <div style={{ padding: 24, color: 'var(--text-3)' }}>Loading…</div>
+            <EmptyState kind="loading" />
           ) : files.length === 0 ? (
-            <div style={{ padding: 24, color: 'var(--text-3)' }}>No files here.</div>
+            <EmptyState kind="empty" />
           ) : (
             <FileGrid files={files} onOpen={handleOpen} />
           )}
@@ -450,3 +450,90 @@ function MoveModal({ folders, onClose, onMove }: { folders: string[], onClose: (
   )
 }
 
+/* ── Empty / loading states ───────────────────────────────────────────────── */
+
+function EmptyState({ kind }: { kind: 'loading' | 'empty' }) {
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 20,
+      color: 'var(--text-3)',
+      padding: 40,
+      userSelect: 'none',
+    }}>
+      {kind === 'loading' ? <LoadingIllustration /> : <EmptyIllustration />}
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--text-2)', marginBottom: 4 }}>
+          {kind === 'loading' ? 'Loading your files…' : 'Nothing here yet'}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-3)' }}>
+          {kind === 'loading'
+            ? 'Fetching from Drive, hang tight'
+            : 'Upload files to this channel to see them here'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Animated shimmer grid — conveys "loading thumbnails" */
+function LoadingIllustration() {
+  return (
+    <svg width="140" height="140" viewBox="0 0 140 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="shimG" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="var(--bg-2)" />
+          <stop offset="50%" stopColor="var(--bg-3)" />
+          <stop offset="100%" stopColor="var(--bg-2)" />
+          <animateTransform
+            attributeName="gradientTransform" type="translate"
+            from="-1 0" to="2 0" dur="1.4s" repeatCount="indefinite"
+          />
+        </linearGradient>
+      </defs>
+      {Array.from({ length: 9 }).map((_, i) => {
+        const col = i % 3
+        const row = Math.floor(i / 3)
+        return (
+          <rect
+            key={i}
+            x={col * 48 + 2} y={row * 48 + 2}
+            width={42} height={42} rx={3}
+            fill="url(#shimG)"
+            opacity={0.6 + (i % 3) * 0.13}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
+/** Cloud + photo illustration — conveys "empty folder" */
+function EmptyIllustration() {
+  return (
+    <svg width="120" height="110" viewBox="0 0 120 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Cloud body */}
+      <path
+        d="M90 55c0-11-9-20-20-20-2 0-4 .3-5.8.9C62 28.5 54.5 22 45.5 22 33.6 22 24 31.6 24 43.5c0 .5 0 1 .1 1.5C16.6 47 11 53.5 11 61.5 11 70.6 18.4 78 27.5 78h58C94.6 78 102 70.6 102 61.5c0-3.7-1.2-7.1-3.3-9.8A19.9 19.9 0 0 0 90 55Z"
+        fill="var(--bg-2)" stroke="var(--border-bright)" strokeWidth="1.5"
+      />
+      {/* Photo frame */}
+      <rect x="38" y="38" width="44" height="34" rx="3"
+        fill="var(--bg-3)" stroke="var(--border-bright)" strokeWidth="1.2" />
+      {/* Mountains */}
+      <path d="M44 66l10-14 8 10 6-7 10 11H44Z"
+        fill="var(--bg-2)" stroke="var(--accent)" strokeWidth="1.2" strokeLinejoin="round" />
+      {/* Sun */}
+      <circle cx="72" cy="46" r="4" fill="var(--warn)" opacity="0.7" />
+      {/* Pulsing down-arrow */}
+      <path d="M60 84v12M55 91l5 5 5-5"
+        stroke="var(--text-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <animate attributeName="opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite" />
+      </path>
+    </svg>
+  )
+}

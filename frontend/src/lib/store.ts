@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { Channel, ViewMode, BrowseMode, MediaType } from './api'
 
+const isMobile = () => window.innerWidth <= 768
+
 interface AppState {
   // Selected channel
   channel: Channel | null
@@ -34,10 +36,21 @@ export const useStore = create<AppState>((set) => ({
   setSidebarOpen: (o) => set({ sidebarOpen: o }),
 
   channel: null,
-  setChannel: (c) => set({ channel: c, folderPath: '', selected: new Set() }),
+  setChannel: (c) => set({
+    channel: c,
+    folderPath: '',
+    selected: new Set(),
+    // Auto-close sidebar on mobile after selecting a channel
+    ...(isMobile() ? { sidebarOpen: false } : {}),
+  }),
 
   folderPath: '',
-  setFolderPath: (p) => set({ folderPath: p, selected: new Set() }),
+  setFolderPath: (p) => set({
+    folderPath: p,
+    selected: new Set(),
+    // Auto-close sidebar on mobile after selecting a folder
+    ...(isMobile() ? { sidebarOpen: false } : {}),
+  }),
 
   browseMode: 'folder',
   setBrowseMode: (m) => set({ browseMode: m }),

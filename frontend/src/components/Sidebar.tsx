@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
-import { HardDrive, Plus, X } from 'lucide-react'
+import { HardDrive, Plus, X, Trash2 } from 'lucide-react'
 import { api, Channel } from '../lib/api'
 import { useStore } from '../lib/store'
+import { cacheClear, cacheSize } from '../lib/thumbCache'
 
 export function Sidebar() {
   const { channel, setChannel } = useStore()
   const [channels, setChannels] = useState<Channel[]>([])
   const [adding, setAdding] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  const [thumbCount, setThumbCount] = useState(0)
+
+  useEffect(() => {
+    cacheSize().then(setThumbCount)
+  }, [])
 
   useEffect(() => {
     api.channels.list().then(r => {
@@ -123,6 +129,35 @@ export function Sidebar() {
           </button>
         )}
       </div> */}
+      {/* Cache info footer */}
+      <div style={{
+        padding: '8px 12px',
+        borderTop: '1px solid var(--border)',
+        fontSize: 11,
+        color: 'var(--text-3)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 6,
+      }}>
+        <span>{thumbCount} thumbs cached</span>
+        <button
+          onClick={async () => {
+            await cacheClear()
+            setThumbCount(0)
+          }}
+          title="Clear thumbnail cache"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            color: 'var(--text-3)', fontSize: 11,
+            padding: '3px 6px',
+            borderRadius: 4,
+            border: '1px solid var(--border)',
+          }}
+        >
+          <Trash2 size={10} /> Clear
+        </button>
+      </div>
     </div>
   )
 }

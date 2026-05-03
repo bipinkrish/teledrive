@@ -67,3 +67,11 @@ input, select { font-family: inherit; }
   animation: shimmer 1.4s infinite;
   border-radius: var(--radius);
 }
+
+/* Grid cell hover — show checkbox on pointer devices */
+.grid-cell .cell-check { opacity: 0; }
+.grid-cell:hover .cell-check { opacity: 1; }
+/* Touch devices: always show check when in select mode (handled via inline style) */
+@media (hover: none) {
+  .grid-cell .cell-check { opacity: 0; }
+}

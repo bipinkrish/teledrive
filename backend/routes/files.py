@@ -44,22 +44,40 @@ async def list_files(
     if type:
         query["type"] = type
     if path is not None:
+        # Exact match hits the compound index directly.
+        # Regex for recursive mode still benefits from the channel_id prefix.
         query["folder_path"] = (
             {"$regex": f"^{re.escape(path)}"} if recursive else path
         )
+
+    # Fetch docs and total count in parallel — halves round-trip latency.
     cursor = db.files.find(query).skip(skip).limit(limit).sort("name", 1)
-    docs = await cursor.to_list(length=limit)
-    
-    for doc in docs:
-        if doc.get("is_split") and doc.get("group_id"):
-            parts = await db.file_parts.find(
-                {"group_id": doc["group_id"], "channel_id": channel_id},
-                {"size": 1}
-            ).to_list(length=None)
-            doc["size"] = sum(p.get("size", 0) for p in parts)
-            
-    total = await db.files.count_documents(query)
+    docs, total = await asyncio.gather(
+        cursor.to_list(length=limit),
+        db.files.count_documents(query),
+    )
+
+    # Batch-resolve split-file sizes in one query (avoid N+1).
+    split_group_ids = [
+        doc["group_id"] for doc in docs
+        if doc.get("is_split") and doc.get("group_id")
+    ]
+    if split_group_ids:
+        all_parts = await db.file_parts.find(
+            {"group_id": {"$in": split_group_ids}, "channel_id": channel_id},
+            {"group_id": 1, "size": 1},
+        ).to_list(length=None)
+        size_map: dict = {}
+        for p in all_parts:
+            gid = p["group_id"]
+            size_map[gid] = size_map.get(gid, 0) + p.get("size", 0)
+        for doc in docs:
+            gid = doc.get("group_id")
+            if gid and gid in size_map:
+                doc["size"] = size_map[gid]
+
     return {"total": total, "items": [_serialize(d) for d in docs]}
+
 
 
 @router.get("/folders")
@@ -117,7 +135,10 @@ async def get_thumbnail(message_id: int, channel_id: int):
 
     return StreamingResponse(
         stream(), media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -170,6 +191,56 @@ async def get_thumbnails_batch(message_ids: str, channel_id: int):
                 res[r[0]] = r[1]
                 
     return res
+
+
+# ── Storage cleanup ───────────────────────────────────────────────────────────
+
+# @router.delete("/cleanup")
+# async def cleanup_storage(channel_id: int, dry_run: bool = True):
+#     """
+#     Remove orphaned/stale records to keep free-tier MongoDB storage healthy.
+
+#     Removes:
+#     - file_parts records whose parent file doc no longer exists
+#     - Duplicate message_id entries in files collection (keeps newest)
+
+#     Use dry_run=false to actually delete.
+#     """
+#     db = get_db()
+#     report = {"dry_run": dry_run, "removed": {}}
+
+#     # 1. Find orphaned file_parts (group_id not in any files doc)
+#     all_group_ids = set()
+#     async for doc in db.files.find({"channel_id": channel_id, "group_id": {"$exists": True}}, {"group_id": 1}):
+#         if doc.get("group_id"):
+#             all_group_ids.add(doc["group_id"])
+
+#     orphan_parts_q = {
+#         "channel_id": channel_id,
+#         "group_id": {"$nin": list(all_group_ids)},
+#     }
+#     orphan_parts_count = await db.file_parts.count_documents(orphan_parts_q)
+#     report["removed"]["orphan_parts"] = orphan_parts_count
+#     if not dry_run and orphan_parts_count > 0:
+#         await db.file_parts.delete_many(orphan_parts_q)
+
+#     # 2. Find duplicate message_ids in files (keep first seen)
+#     pipeline = [
+#         {"$match": {"channel_id": channel_id}},
+#         {"$group": {"_id": "$message_id", "count": {"$sum": 1}, "ids": {"$push": "$_id"}}},
+#         {"$match": {"count": {"$gt": 1}}},
+#     ]
+#     dups = await db.files.aggregate(pipeline).to_list(length=10000)
+#     dup_ids_to_remove = []
+#     for dup in dups:
+#         # keep first, remove rest
+#         dup_ids_to_remove.extend(dup["ids"][1:])
+
+#     report["removed"]["duplicate_file_docs"] = len(dup_ids_to_remove)
+#     if not dry_run and dup_ids_to_remove:
+#         await db.files.delete_many({"_id": {"$in": dup_ids_to_remove}})
+
+#     return report
 
 
 # ── Download (single file or server-side-merged split file) ───────────────────
