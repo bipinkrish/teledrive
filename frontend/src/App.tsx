@@ -7,9 +7,16 @@ import { useStore } from './lib/store'
 import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 
+const APP_PWD = import.meta.env.VITE_APP_PASSWORD
+
 function App() {
   const { channel, setChannel, sidebarOpen } = useStore()
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+
+  const [auth, setAuth] = useState(() => {
+    if (!APP_PWD) return true
+    return sessionStorage.getItem('teledrive_auth') === APP_PWD
+  })
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 768)
@@ -18,12 +25,47 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!auth) return
     api.channels.list().then(r => {
       if (r.channels.length > 0 && !useStore.getState().channel) {
         setChannel(r.channels[0])
       }
     })
-  }, [setChannel])
+  }, [setChannel, auth])
+
+  if (!auth) {
+    return (
+      <div style={{ 
+        height: '100%', display: 'flex', flexDirection: 'column', 
+        alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' 
+      }}>
+        <h2 style={{ marginBottom: 16 }}>TeleDrive</h2>
+        <form onSubmit={e => {
+          e.preventDefault();
+          const pwd = new FormData(e.currentTarget).get('password')
+          if (pwd === APP_PWD) {
+            sessionStorage.setItem('teledrive_auth', APP_PWD)
+            setAuth(true)
+          } else {
+            alert('Incorrect Password')
+          }
+        }} style={{ display: 'flex', gap: 8 }}>
+          <input 
+            name="password" type="password" placeholder="Password" required autoFocus
+            style={{ 
+              padding: '8px 12px', borderRadius: 'var(--radius)', 
+              border: '1px solid var(--border)', background: 'var(--bg-1)',
+              color: 'var(--text)'
+            }} 
+          />
+          <button type="submit" style={{
+            padding: '8px 16px', borderRadius: 'var(--radius)', 
+            background: 'var(--accent)', color: 'white', border: 'none', cursor: 'pointer'
+          }}>Login</button>
+        </form>
+      </div>
+    )
+  }
 
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>

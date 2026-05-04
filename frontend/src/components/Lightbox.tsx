@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { X, Download, ChevronLeft, ChevronRight, Package, Loader2, Maximize, Play } from 'lucide-react'
-import { FileDoc, api } from '../lib/api'
+import { FileDoc, api, loadThumbnail } from '../lib/api'
 import { fmtBytes } from '../lib/utils'
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
 export function Lightbox({ file: initial, files, onClose, onDownload }: Props) {
   const [current, setCurrent] = useState(initial)
   const [thumbLoaded, setThumbLoaded] = useState(false)
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null)
   const [fullLoaded, setFullLoaded] = useState(false)
   const [fullUrl, setFullUrl] = useState<string | null>(null)
   const [loadingHighRes, setLoadingHighRes] = useState(false)
@@ -41,7 +42,15 @@ export function Lightbox({ file: initial, files, onClose, onDownload }: Props) {
     setFullUrl(null)
     setFullLoaded(false)
     setThumbLoaded(false)
+    setThumbUrl(null)
     setLoadingHighRes(false)
+    
+    // Load the optimized thumbnail
+    if (current.thumb_msg_id) {
+      loadThumbnail(current.message_id, current.channel_id).then(url => {
+        setThumbUrl(url)
+      }).catch(console.error)
+    }
   }, [current.message_id, current.channel_id])
 
   useEffect(() => {
@@ -118,10 +127,6 @@ export function Lightbox({ file: initial, files, onClose, onDownload }: Props) {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [go, onClose])
-
-  const thumbUrl = current.thumb_msg_id
-    ? api.files.thumbnailUrl(current.message_id, current.channel_id)
-    : null
 
   const displayUrl = fullLoaded ? fullUrl : thumbUrl
 

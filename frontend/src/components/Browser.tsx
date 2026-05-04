@@ -48,6 +48,7 @@ export function Browser() {
   // Load files
   useEffect(() => {
     if (!channelId) return
+    setFiles([])
     setLoading(true)
     const params: Parameters<typeof api.files.list>[0] = {
       channel_id: channelId,
